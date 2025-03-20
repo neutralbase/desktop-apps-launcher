@@ -88,3 +88,47 @@ Input:
   "appName": "Safari"
 }
 ```
+
+### list_configured_apps
+
+Lists applications that have special configurations built into the server.
+
+### Special Application Support
+
+#### Firecrawl (Desktop Crawler)
+
+The server includes specialized tools for Desktop Crawler (Firecrawl):
+
+### start_firecrawl
+
+Starts Firecrawl services in headless mode.
+
+Input:
+
+```json
+{
+  "seedUrl": "https://example.com" // Optional starting URL
+}
+```
+
+This is equivalent to calling `start_app` with:
+
+```json
+{
+  "appName": "firecrawl",
+  "args": ["--headless", "--firecrawl-headless"]
+}
+```
+
+### stop_firecrawl
+
+Stops running Firecrawl services.
+
+Input:
+
+```json
+{
+  "appName": "firecrawl",
+  "args": ["--stop"]
+}
+```

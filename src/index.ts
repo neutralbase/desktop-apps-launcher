@@ -69,7 +69,7 @@ const APP_CONFIGS: Record<string, AppConfig> = {
         default:
           throw new Error(`Unsupported platform: ${platform}`);
       }
-      return `"${executable}" --headless --firecrawl-headless --stop`;
+      return `"${executable}" --stop`;
     }
   }
 };
