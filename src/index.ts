@@ -347,59 +347,101 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (request.params.name) {
             case "list_applications": {
                 const apps = await listApplications();
-                return { toolResult: ListApplicationsOutputSchema.parse({ applications: apps }) };
+                return { 
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(ListApplicationsOutputSchema.parse({ applications: apps }))
+                        }
+                    ]
+                };
             }
             case "launch_app": {
                 const args = LaunchAppInputSchema.parse(request.params.arguments);
                 const success = await launchApp(args.appName);
                 return {
-                    toolResult: LaunchAppOutputSchema.parse({
-                        success,
-                        message: success ? 'Application launched successfully' : 'Failed to launch application'
-                    })
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(LaunchAppOutputSchema.parse({
+                                success,
+                                message: success ? 'Application launched successfully' : 'Failed to launch application'
+                            }))
+                        }
+                    ]
                 };
             }
             case "open_with_app": {
                 const args = OpenWithAppInputSchema.parse(request.params.arguments);
                 const success = await openWithApp(args.appName, args.filePath);
                 return {
-                    toolResult: OpenWithAppOutputSchema.parse({
-                        success,
-                        message: success ? 'File opened successfully' : 'Failed to open file with application'
-                    })
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(OpenWithAppOutputSchema.parse({
+                                success,
+                                message: success ? 'File opened successfully' : 'Failed to open file with application'
+                            }))
+                        }
+                    ]
                 };
             }
             case "start_app": {
                 const args = StartAppInputSchema.parse(request.params.arguments);
                 const result = await startApp(args.appName, args.args);
                 return {
-                    toolResult: StartAppOutputSchema.parse(result)
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(StartAppOutputSchema.parse(result))
+                        }
+                    ]
                 };
             }
             case "stop_app": {
                 const args = StopAppInputSchema.parse(request.params.arguments);
                 const result = await stopApp(args.appName);
                 return {
-                    toolResult: StopAppOutputSchema.parse(result)
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(StopAppOutputSchema.parse(result))
+                        }
+                    ]
                 };
             }
             case "list_configured_apps": {
                 const apps = getConfiguredApps();
                 return { 
-                    toolResult: ListConfiguredAppsOutputSchema.parse({ apps }) 
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(ListConfiguredAppsOutputSchema.parse({ apps }))
+                        }
+                    ]
                 };
             }
             case "start_firecrawl": {
                 const startArgs = ['--headless', '--firecrawl-headless'];
                 const result = await startApp('firecrawl', startArgs);
                 return {
-                    toolResult: StartAppOutputSchema.parse(result)
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(StartAppOutputSchema.parse(result))
+                        }
+                    ]
                 };
             }
             case "stop_firecrawl": {
                 const result = await stopApp('firecrawl');
                 return {
-                    toolResult: StopAppOutputSchema.parse(result)
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(StopAppOutputSchema.parse(result))
+                        }
+                    ]
                 };
             }
             default:
@@ -407,9 +449,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
     } catch (error) {
         if (error instanceof z.ZodError) {
-            throw new Error("Invalid arguments");
+            return {
+                isError: true,
+                content: [
+                    {
+                        type: 'text',
+                        text: `Invalid arguments: ${error.message}`
+                    }
+                ]
+            };
         }
-        throw error;
+        return {
+            isError: true,
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }
+            ]
+        };
     }
 });
 
