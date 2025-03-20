@@ -1,11 +1,11 @@
 {
-  "name": "@joshuarileydev/mac-apps-launcher-mcp-server",
+  "name": "@neutralbase/desktop-apps-launcher-mcp",
   "version": "0.0.1",
-  "description": "MCP server for launching applications on macOS",
+  "description": "MCP server for launching applications on desktop",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "mcp-server": "dist/index.js"
+    "desktop-apps-launcher-mcp": "./dist/src/index.js"
   },
   "files": [
     "dist"
