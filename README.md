@@ -16,14 +16,39 @@ A Model Context Protocol (MCP) server for launching and managing Desktop applica
 
 ## Installation
 
-Add the following to your Claude Config JSON file
+### Option 1: Using npx (recommended)
+
+Add the following to your Claude Config JSON file:
 
 ```json
 {
   "mcpServers": {
-    "desktop-apps-launcher": {
+    "desktop-apps-launcher-mcp": {
       "command": "npx",
       "args": ["--yes", "@neutralbase/desktop-apps-launcher-mcp"]
+    }
+  }
+}
+```
+
+The server key (`desktop-apps-launcher-mcp`) must match the binary name in the package.
+
+### Option 2: Global Installation
+
+You can install the package globally:
+
+```bash
+npm install -g @neutralbase/desktop-apps-launcher-mcp
+```
+
+Then add this to your Claude Config JSON file:
+
+```json
+{
+  "mcpServers": {
+    "desktop-apps-launcher-mcp": {
+      "command": "desktop-apps-launcher-mcp",
+      "args": []
     }
   }
 }
@@ -124,6 +149,41 @@ Input:
 ```json
 {}
 ```
+
+## Troubleshooting
+
+### Setting up Claude Desktop
+
+1. Find your Claude Desktop configuration file:
+
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+2. Add the MCP server configuration (using either installation method above)
+
+3. Make sure you have Node.js installed on your system
+
+   - You can verify this by running `node --version` in your terminal
+
+4. Restart Claude Desktop
+
+### Common Issues
+
+- **Missing hammer icon**: Make sure you've restarted Claude Desktop after configuration
+  changes
+
+- **"Client closed" error**: Check Claude's logs for details
+  (`~/Library/Logs/Claude/mcp*.log`)
+
+- **Failed tool calls**: Ensure you have the proper permissions for the applications
+  you're trying to control
+
+- **Binary not found**: Make sure you're using the correct server key in your
+  configuration (must match the binary name)
+
+- **npx errors**: Try installing globally instead (`npm install -g
+  @neutralbase/desktop-apps-launcher-mcp`)
 
 ## Compatibility
 

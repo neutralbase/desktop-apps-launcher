@@ -1,6 +1,6 @@
 {
   "name": "@neutralbase/desktop-apps-launcher-mcp",
-  "version": "0.0.5",
+  "version": "0.0.12",
   "description": "MCP server for launching and managing desktop applications",
   "main": "dist/src/index.js",
   "type": "module",
@@ -8,7 +8,7 @@
     "desktop-apps-launcher-mcp": "./dist/src/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/src/index.js",
     "start": "node dist/src/index.js",
     "prepublishOnly": "npm run build"
   },
@@ -39,6 +39,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/neutralbase/desktop-apps-launcher"
+    "url": "git+https://github.com/neutralbase/desktop-apps-launcher.git"
   }
 }

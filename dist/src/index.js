@@ -106,14 +106,26 @@ async function startApp(appName, args) {
             const startArgs = appConfig.startArgs ? appConfig.startArgs(args) : (args || []);
             console.log(`Command: ${execPath} ${startArgs.join(' ')}`);
             const process = spawn(execPath, startArgs, {
-                detached: true,
-                stdio: 'ignore'
+                detached: true, // Allow the process to run independently of its parent
+                stdio: 'ignore' // Don't pipe stdin/stdout/stderr to prevent blocking
             });
             process.unref();
-            return {
-                success: true,
-                message: `${appConfig.displayName} started successfully with configured settings`
-            };
+            // Wait briefly to check for immediate failures
+            return new Promise((resolve) => {
+                process.on('error', (error) => {
+                    resolve({
+                        success: false,
+                        message: `Failed to start ${appConfig.displayName}: ${error.message}`
+                    });
+                });
+                // Short delay to check for immediate failures
+                setTimeout(() => {
+                    resolve({
+                        success: true,
+                        message: `${appConfig.displayName} started successfully with configured settings`
+                    });
+                }, 500);
+            });
         }
         else {
             // Default behavior for other apps
@@ -130,17 +142,29 @@ async function startApp(appName, args) {
             });
             // Unref the child process to allow the parent to exit independently
             process.unref();
-            return {
-                success: true,
-                message: `Application ${appName} started successfully${args ? ' with arguments: ' + args.join(' ') : ''}`
-            };
+            // Wait briefly to check for immediate failures
+            return new Promise((resolve) => {
+                process.on('error', (error) => {
+                    resolve({
+                        success: false,
+                        message: `Failed to start ${appName}: ${error.message}`
+                    });
+                });
+                // Short delay to check for immediate failures
+                setTimeout(() => {
+                    resolve({
+                        success: true,
+                        message: `Application ${appName} started successfully${args ? ' with arguments: ' + args.join(' ') : ''}`
+                    });
+                }, 500);
+            });
         }
     }
     catch (error) {
         console.error('Error starting application:', error);
         return {
             success: false,
-            message: `Failed to start application: ${error}`
+            message: `Failed to start application: ${error.message || 'Unknown error'}`
         };
     }
 }
@@ -187,7 +211,7 @@ async function stopApp(appName) {
         console.error('Error stopping application:', error);
         return {
             success: false,
-            message: `Failed to stop application: ${error.message}`,
+            message: `Failed to stop application: ${error.message || 'Unknown error'}`,
             stderr: error.stderr || undefined
         };
     }
@@ -197,7 +221,7 @@ function getConfiguredApps() {
     return Object.values(APP_CONFIGS).map(config => config.displayName);
 }
 const server = new Server({
-    name: "mac-launcher",
+    name: "desktop-launcher",
     version: "1.0.0",
 }, {
     capabilities: {
@@ -300,11 +324,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (request.params.name) {
             case "list_applications": {
                 const apps = await listApplications();
+                const result = ListApplicationsOutputSchema.parse({ applications: apps });
                 return {
+                    toolResult: result,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(ListApplicationsOutputSchema.parse({ applications: apps }))
+                            text: JSON.stringify(result)
                         }
                     ]
                 };
@@ -312,14 +338,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "launch_app": {
                 const args = LaunchAppInputSchema.parse(request.params.arguments);
                 const success = await launchApp(args.appName);
+                const result = LaunchAppOutputSchema.parse({
+                    success,
+                    message: success ? 'Application launched successfully' : 'Failed to launch application'
+                });
                 return {
+                    toolResult: result,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(LaunchAppOutputSchema.parse({
-                                success,
-                                message: success ? 'Application launched successfully' : 'Failed to launch application'
-                            }))
+                            text: JSON.stringify(result)
                         }
                     ]
                 };
@@ -327,14 +355,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "open_with_app": {
                 const args = OpenWithAppInputSchema.parse(request.params.arguments);
                 const success = await openWithApp(args.appName, args.filePath);
+                const result = OpenWithAppOutputSchema.parse({
+                    success,
+                    message: success ? 'File opened successfully' : 'Failed to open file with application'
+                });
                 return {
+                    toolResult: result,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(OpenWithAppOutputSchema.parse({
-                                success,
-                                message: success ? 'File opened successfully' : 'Failed to open file with application'
-                            }))
+                            text: JSON.stringify(result)
                         }
                     ]
                 };
@@ -342,11 +372,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "start_app": {
                 const args = StartAppInputSchema.parse(request.params.arguments);
                 const result = await startApp(args.appName, args.args);
+                const parsedResult = StartAppOutputSchema.parse(result);
                 return {
+                    toolResult: parsedResult,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(StartAppOutputSchema.parse(result))
+                            text: JSON.stringify(parsedResult)
                         }
                     ]
                 };
@@ -354,22 +386,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "stop_app": {
                 const args = StopAppInputSchema.parse(request.params.arguments);
                 const result = await stopApp(args.appName);
+                const parsedResult = StopAppOutputSchema.parse(result);
                 return {
+                    toolResult: parsedResult,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(StopAppOutputSchema.parse(result))
+                            text: JSON.stringify(parsedResult)
                         }
                     ]
                 };
             }
             case "list_configured_apps": {
                 const apps = getConfiguredApps();
+                const result = ListConfiguredAppsOutputSchema.parse({ apps });
                 return {
+                    toolResult: result,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(ListConfiguredAppsOutputSchema.parse({ apps }))
+                            text: JSON.stringify(result)
                         }
                     ]
                 };
@@ -377,22 +413,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "start_firecrawl": {
                 const startArgs = ['--headless', '--firecrawl-headless'];
                 const result = await startApp('firecrawl', startArgs);
+                const parsedResult = StartAppOutputSchema.parse(result);
                 return {
+                    toolResult: parsedResult,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(StartAppOutputSchema.parse(result))
+                            text: JSON.stringify(parsedResult)
                         }
                     ]
                 };
             }
             case "stop_firecrawl": {
                 const result = await stopApp('firecrawl');
+                const parsedResult = StopAppOutputSchema.parse(result);
                 return {
+                    toolResult: parsedResult,
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(StopAppOutputSchema.parse(result))
+                            text: JSON.stringify(parsedResult)
                         }
                     ]
                 };
@@ -428,6 +468,8 @@ async function runServer() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Mac Launcher MCP Server running on stdio");
+    // Keep the process alive
+    process.stdin.resume();
 }
 runServer().catch((error) => {
     console.error("Fatal error in main():", error);
