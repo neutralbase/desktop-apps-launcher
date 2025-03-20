@@ -326,9 +326,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             {
                 name: "start_firecrawl",
                 description: "Start Firecrawl services in headless mode",
-                inputSchema: zodToJsonSchema(z.object({
-                    seedUrl: z.string().optional()
-                }))
+                inputSchema: zodToJsonSchema(z.object({}))
             },
             {
                 name: "stop_firecrawl",
@@ -392,11 +390,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case "start_firecrawl": {
-                const args = z.object({ seedUrl: z.string().optional() }).parse(request.params.arguments);
                 const startArgs = ['--headless', '--firecrawl-headless'];
-                if (args.seedUrl) {
-                    startArgs.push(args.seedUrl);
-                }
                 const result = await startApp('firecrawl', startArgs);
                 return {
                     toolResult: StartAppOutputSchema.parse(result)

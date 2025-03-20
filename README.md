@@ -1,6 +1,6 @@
-# Mac Apps Launcher MCP Server
+# Desktop Apps Launcher MCP Server
 
-A Model Context Protocol (MCP) server for launching and managing macOS applications.
+A Model Context Protocol (MCP) server for launching and managing Desktop applications.
 
 ## Features
 
@@ -106,9 +106,7 @@ Starts Firecrawl services in headless mode.
 Input:
 
 ```json
-{
-  "seedUrl": "https://example.com" // Optional starting URL
-}
+{}
 ```
 
 This is equivalent to calling `start_app` with:
@@ -127,8 +125,5 @@ Stops running Firecrawl services.
 Input:
 
 ```json
-{
-  "appName": "firecrawl",
-  "args": ["--stop"]
-}
+{}
 ```
