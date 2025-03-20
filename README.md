@@ -21,11 +21,12 @@ Add the following to your Claude Config JSON file
 ```
 {
   "mcpServers": {
-    "simulator": {
+    "desktop-apps-launcher-mcp": {
       "command": "npx",
       "args": [
-        "y",
+        "--yes",
         "@neutralbase/desktop-apps-launcher-mcp"
+
       ]
     }
   }
