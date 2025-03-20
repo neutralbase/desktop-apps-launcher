@@ -1,28 +1,44 @@
 {
   "name": "@neutralbase/desktop-apps-launcher-mcp",
-  "version": "0.0.4",
-  "description": "MCP server for launching applications on desktop",
-  "license": "MIT",
+  "version": "0.0.5",
+  "description": "MCP server for launching and managing desktop applications",
+  "main": "dist/src/index.js",
   "type": "module",
   "bin": {
     "desktop-apps-launcher-mcp": "./dist/src/index.js"
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "tsc && shx chmod +x dist/src/*.js",
-    "prepare": "npm run build",
-    "watch": "tsc --watch"
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "prepublishOnly": "npm run build"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "desktop",
+    "applications",
+    "launcher",
+    "claude"
+  ],
+  "author": "Neutral Base",
+  "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "0.6.0",
-    "@types/node-fetch": "^2.6.12",
-    "node-fetch": "^3.3.2",
-    "zod-to-json-schema": "^3.23.5"
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "zod": "^3.22.4",
+    "zod-to-json-schema": "^3.22.3"
   },
   "devDependencies": {
-    "shx": "^0.3.4",
-    "typescript": "^5.6.2"
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.2"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neutralbase/desktop-apps-launcher"
   }
 }

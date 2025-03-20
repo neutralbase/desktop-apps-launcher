@@ -18,16 +18,12 @@ A Model Context Protocol (MCP) server for launching and managing Desktop applica
 
 Add the following to your Claude Config JSON file
 
-```
+```json
 {
   "mcpServers": {
-    "desktop-apps-launcher-mcp": {
+    "desktop-apps-launcher": {
       "command": "npx",
-      "args": [
-        "--yes",
-        "@neutralbase/desktop-apps-launcher-mcp"
-
-      ]
+      "args": ["--yes", "@neutralbase/desktop-apps-launcher-mcp"]
     }
   }
 }
@@ -128,3 +124,8 @@ Input:
 ```json
 {}
 ```
+
+## Compatibility
+
+This server is compatible with both MCP protocol v0.x and v1.x, providing backward
+compatibility with older clients while supporting newer features.
