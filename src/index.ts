@@ -14,8 +14,19 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import * as os from 'os';
 import * as fs from 'fs';
+import treeKill from 'tree-kill';
 
 const execAsync = promisify(exec);
+
+// Process tracking for proper termination
+interface ProcessInfo {
+  pid: number;
+  displayName: string;
+  startTime: Date;
+}
+
+// Map to track running processes by app name
+const runningProcesses: Map<string, ProcessInfo> = new Map();
 
 // App configurations for specific applications
 interface AppConfig {
@@ -73,16 +84,7 @@ const APP_CONFIGS: Record<string, AppConfig> = {
     startArgs: ['--headless', '--firecrawl-headless'],
     stopArgs: ['--headless', '--stop']
   }
-  // Add more app configurations here as needed, example below
-//   'my-app': {
-//   id: 'my-app',
-//   displayName: 'My Application',
-//   // Only specify custom paths if the app doesn't follow conventions
-//   execPath: {
-//     darwin: '/Applications/CustomPath/MyApp.app/Contents/MacOS/MyCustomBinary'
-//   },
-//   startArgs: ['--special-flag', '--headless'],
-//   stopArgs: ['--cleanup', '--exit']
+  // Add more app configurations here as needed
 };
 
 // Silent debug function to avoid any console output
@@ -93,14 +95,20 @@ function debug(...args: any[]) {
 // Helper function for running processes safely
 function safeSpawnAsync(command: string, args: string[], useShell = false): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
-      detached: true,
-      shell: useShell, // set to true if you need shell processing
-      stdio: ['ignore', 'ignore', 'ignore']
-    });
-    proc.on('error', (err) => reject(err));
-    // Allow a short delay to catch any immediate errors
-    setTimeout(() => resolve(), 500);
+    try {
+      const proc = spawn(command, args, {
+        detached: true,
+        shell: useShell,
+        stdio: 'ignore' // Use a single value that applies to all streams
+      });
+      
+      proc.on('error', (error: Error) => reject(error));
+      
+      // Allow a short delay to catch any immediate errors
+      setTimeout(() => resolve(), 500);
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -137,8 +145,27 @@ async function openWithApp(appName: string, filePath: string): Promise<boolean> 
     }
 }
 
-// Core function for launching applications with specific arguments
-async function launchAppProcess(appName: string, isStop: boolean, customArgs?: string[]): Promise<{success: boolean, message: string, stdout?: string, stderr?: string}> {
+// Function to start an app and automatically stop it after a specified timeout
+async function startAppWithTimeout(appName: string, timeoutMs: number = 3600000, customArgs?: string[]): Promise<{success: boolean, message: string}> {
+  const startResult = await startApp(appName, customArgs);
+  if (!startResult.success) {
+    return startResult;
+  }
+  
+  // Schedule stop after the specified timeout
+  setTimeout(async () => {
+    const stopResult = await stopApp(appName);
+    debug(`Timeout reached: stopped ${appName}:`, stopResult.message);
+  }, timeoutMs);
+  
+  return {
+    success: startResult.success,
+    message: `${startResult.message} (with auto-shutdown in ${Math.round(timeoutMs/60000)} minutes)`
+  };
+}
+
+// Core function for starting applications that uses process tracking
+async function startApp(appName: string, customArgs?: string[]): Promise<{success: boolean, message: string}> {
     try {
         // Check if we have a specific configuration for this app
         const appConfig = APP_CONFIGS[appName.toLowerCase()];
@@ -149,89 +176,163 @@ async function launchAppProcess(appName: string, isStop: boolean, customArgs?: s
         if (appConfig) {
             // Use the app-specific configuration
             execPath = getExecutablePath(appConfig.displayName, appConfig);
-            args = customArgs ? customArgs : (isStop ? appConfig.stopArgs : appConfig.startArgs);
+            args = customArgs ? customArgs : appConfig.startArgs;
             displayName = appConfig.displayName;
         } else {
             // Default behavior for other apps
             displayName = appName;
             execPath = getExecutablePath(appName);
-            args = customArgs || (isStop ? ['--quit'] : []);
+            args = customArgs || [];
         }
         
-        if (execPath.includes(' ') && os.platform() === 'darwin') {
-            // For macOS paths with spaces
-            await safeSpawnAsync(execPath, args, true);
-            return {
-                success: true,
-                message: `${displayName} ${isStop ? 'stopped' : 'started'} successfully`
-            };
-        } else {
-            const proc = spawn(execPath, args, {
-                detached: true,
-                stdio: ['ignore', 'ignore', 'ignore']
+        // For macOS paths with spaces or any path on any platform
+        // We'll use sh -c with complete output redirection to prevent any leakage
+        const shellCmd = `"${execPath}" ${args.join(' ')} >/dev/null 2>&1 & echo $!`;
+        
+        // Use the shell to launch the process and get its PID
+        const { stdout } = await execAsync(`sh -c '${shellCmd}'`);
+        const pid = parseInt(stdout.trim(), 10);
+        
+        if (pid && !isNaN(pid)) {
+            // Store the process info for later use
+            runningProcesses.set(appName.toLowerCase(), {
+                pid: pid,
+                displayName,
+                startTime: new Date()
             });
             
-            if (!isStop) {
-                proc.unref();  // Only unref for start operations
+            return {
+                success: true,
+                message: `${displayName} started successfully`
+            };
+        } else {
+            // Fallback if we couldn't get the PID
+            const proc = spawn(execPath, args, {
+                detached: true,
+                stdio: 'ignore'
+            });
+            
+            // Store the process info for later use
+            if (proc.pid) {
+                runningProcesses.set(appName.toLowerCase(), {
+                    pid: proc.pid,
+                    displayName,
+                    startTime: new Date()
+                });
+                
+                // Detach the process from the parent
+                proc.unref();
             }
             
             return new Promise((resolve) => {
                 proc.on('error', (error) => {
                     resolve({
                         success: false,
-                        message: `Failed to ${isStop ? 'stop' : 'start'} ${displayName}: ${error.message}`
+                        message: `Failed to start ${displayName}: ${error.message}`
                     });
                 });
+                
                 setTimeout(() => {
                     resolve({
                         success: true,
-                        message: `${displayName} ${isStop ? 'stopped' : 'started'} successfully`
+                        message: `${displayName} started successfully`
                     });
                 }, 500);
             });
         }
     } catch (error: any) {
-        // For stop operations, try pkill as fallback
-        if (isStop) {
-            try {
-                const appNameNoExt = appName.replace(/\.app$/, '');
-                await safeSpawnAsync('pkill', ['-f', appNameNoExt]);
-                return {
-                    success: true,
-                    message: `Application ${appName} stopped using pkill`
-                };
-            } catch (pkillError: any) {
-                // pkill returns exit code 1 if no processes were killed, which is not a real error
-                if (pkillError.code === 1) {
-                    return {
-                        success: true,
-                        message: `No running processes found for ${appName}`,
-                    };
-                }
-            }
-        }
-        
         return {
             success: false,
-            message: `Failed to ${isStop ? 'stop' : 'start'} application: ${error.message || 'Unknown error'}`,
-            stderr: error.stderr || undefined
+            message: `Failed to start application: ${error.message || 'Unknown error'}`
         };
     }
 }
 
-// Simplified wrapper for starting applications
-async function startApp(appName: string, customArgs?: string[]): Promise<{success: boolean, message: string}> {
-    return launchAppProcess(appName, false, customArgs);
+// Function to stop applications using tree-kill
+async function stopApp(appName: string): Promise<{success: boolean, message: string, stdout?: string, stderr?: string}> {
+    // First, check if we have a PID for this application
+    const processInfo = runningProcesses.get(appName.toLowerCase());
+    
+    if (processInfo) {
+        // We have a PID, use tree-kill to terminate the entire process tree
+        return new Promise((resolve) => {
+            treeKill(processInfo.pid, 'SIGTERM', (err) => {
+                if (err) {
+                    // If tree-kill fails, try using pkill as fallback
+                    resolve(stopAppWithPkill(appName, processInfo.displayName));
+                } else {
+                    // Successfully killed, remove from tracking
+                    runningProcesses.delete(appName.toLowerCase());
+                    resolve({
+                        success: true,
+                        message: `${processInfo.displayName} stopped successfully (PID: ${processInfo.pid})`
+                    });
+                }
+            });
+        });
+    } else {
+        // No PID stored, try using pkill
+        return stopAppWithPkill(appName);
+    }
 }
 
-// Simplified wrapper for stopping applications
-async function stopApp(appName: string, customArgs?: string[]): Promise<{success: boolean, message: string, stdout?: string, stderr?: string}> {
-    return launchAppProcess(appName, true, customArgs);
+// Helper function to stop an app using pkill
+async function stopAppWithPkill(appName: string, displayName?: string): Promise<{success: boolean, message: string, stdout?: string, stderr?: string}> {
+    try {
+        const appNameWithoutExt = appName.replace(/\.app$/, '');
+        const actualDisplayName = displayName || appName;
+        
+        // For macOS, try using pkill to find and terminate the process
+        if (os.platform() === 'darwin') {
+            await safeSpawnAsync('sh', ['-c', `pkill -f "${appNameWithoutExt}" >/dev/null 2>&1`], false);
+        } else if (os.platform() === 'win32') {
+            await safeSpawnAsync('taskkill', ['/F', '/IM', `${appNameWithoutExt}.exe`], false);
+        } else {
+            await safeSpawnAsync('pkill', ['-f', appNameWithoutExt], false);
+        }
+        
+        // Remove from tracking regardless of pkill result
+        runningProcesses.delete(appName.toLowerCase());
+        
+        return {
+            success: true,
+            message: `${actualDisplayName} stopped using system terminate command`
+        };
+    } catch (pkillError: any) {
+        // pkill returns exit code 1 if no processes were killed, which is not a real error
+        if (pkillError.code === 1) {
+            return {
+                success: true,
+                message: `No running processes found for ${displayName || appName}`,
+            };
+        }
+        
+        return {
+            success: false,
+            message: `Failed to stop application: ${pkillError.message || 'Unknown error'}`,
+            stderr: pkillError.stderr || undefined
+        };
+    }
 }
 
 // Function to get a list of apps that have special configurations
 function getConfiguredApps(): string[] {
     return Object.values(APP_CONFIGS).map(config => config.displayName);
+}
+
+// Function to list currently running processes that we're tracking
+function getRunningApps(): {appName: string, pid: number, startTime: string}[] {
+    const result: {appName: string, pid: number, startTime: string}[] = [];
+    
+    runningProcesses.forEach((info, key) => {
+        result.push({
+            appName: info.displayName,
+            pid: info.pid,
+            startTime: info.startTime.toISOString()
+        });
+    });
+    
+    return result;
 }
 
 const server = new Server({
@@ -295,6 +396,15 @@ const ListConfiguredAppsOutputSchema = z.object({
     apps: z.array(z.string())
 });
 
+// New schema for listing running apps
+const ListRunningAppsOutputSchema = z.object({
+    apps: z.array(z.object({
+        appName: z.string(),
+        pid: z.number(),
+        startTime: z.string()
+    }))
+});
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
         tools: [
@@ -329,6 +439,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 inputSchema: zodToJsonSchema(z.object({}))
             },
             {
+                name: "list_running_apps",
+                description: "List applications currently running that were started by this tool",
+                inputSchema: zodToJsonSchema(z.object({}))
+            },
+            {
                 name: "start_firecrawl",
                 description: "Start Firecrawl services in headless mode",
                 inputSchema: zodToJsonSchema(z.object({}))
@@ -344,8 +459,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-        if (!request.params.arguments && request.params.name !== "list_applications" && 
-            request.params.name !== "list_configured_apps") {
+        if (!request.params.arguments && 
+            request.params.name !== "list_applications" && 
+            request.params.name !== "list_configured_apps" &&
+            request.params.name !== "list_running_apps") {
             throw new Error("Arguments are required");
         }
 
@@ -413,7 +530,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "stop_app": {
                 const args = StopAppInputSchema.parse(request.params.arguments);
-                const result = await stopApp(args.appName, args.args);
+                const result = await stopApp(args.appName);
                 const parsedResult = StopAppOutputSchema.parse(result);
                 return {
                     toolResult: parsedResult,
@@ -438,9 +555,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ]
                 };
             }
+            case "list_running_apps": {
+                const apps = getRunningApps();
+                const result = ListRunningAppsOutputSchema.parse({ apps });
+                return { 
+                    toolResult: result,
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result)
+                        }
+                    ]
+                };
+            }
             case "start_firecrawl": {
-                // Call startApp with the desktop-crawler ID
-                const result = await startApp('desktop-crawler');
+                // Call startAppWithTimeout to automatically stop Firecrawl after 1 hour
+                const result = await startAppWithTimeout('desktop-crawler', 3600000);  // 3600000ms = 1 hour
                 const parsedResult = StartAppOutputSchema.parse(result);
                 return {
                     toolResult: parsedResult,
@@ -522,8 +652,10 @@ async function runServer() {
     // Set up the stdio transport ensuring nothing else writes to stdio
     const transport = new StdioServerTransport();
     
-    // Redirect any uncaught errors to a null stream to prevent breaking JSON-RPC
+    // Completely redirect all stderr output to prevent any interference
     process.stderr.write = ((): any => {}) as any;
+    
+    // Only allow JSON-RPC messages on stdout
     process.stdout.write = function (
       this: NodeJS.WriteStream,
       chunk: string | Buffer,
@@ -532,10 +664,14 @@ async function runServer() {
     ): boolean {
       // Only pass through if it's likely to be a JSON-RPC message
       if (typeof chunk === 'string' && (chunk.trim().startsWith('{') || chunk.trim().startsWith('['))) {
-        // Call the original write method using the proper "this" context and arguments
+        // Call the original write method using the proper "this" context
         return process.stdout.constructor.prototype.write.apply(this, arguments as any);
       }
-      return true; // Ignore any other writes
+      // Call callback if provided but don't write to stdout
+      if (callback) {
+        callback(null);
+      }
+      return true; // Indicate success without actually writing
     } as typeof process.stdout.write;
     
     await server.connect(transport);
