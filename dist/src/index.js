@@ -9,6 +9,7 @@ import { join } from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import * as os from 'os';
+import * as fs from 'fs';
 const execAsync = promisify(exec);
 const APP_CONFIGS = {
     'firecrawl': {
@@ -39,25 +40,25 @@ const APP_CONFIGS = {
         },
         stopCommand: () => {
             const platform = os.platform();
-            let executable;
             switch (platform) {
                 case 'darwin': // macOS
-                    executable = '/Applications/Desktop Crawler.app/Contents/MacOS/Desktop Crawler';
-                    break;
+                    // Use the path without escaping spaces since we'll quote it properly
+                    return '/Applications/Desktop Crawler.app/Contents/MacOS/Desktop Crawler --stop';
                 case 'win32': // Windows
-                    executable = 'C:\\Program Files\\Desktop Crawler\\Desktop Crawler.exe';
-                    break;
+                    return '"C:\\Program Files\\Desktop Crawler\\Desktop Crawler.exe" --stop';
                 case 'linux':
-                    executable = '/usr/local/bin/desktop-crawler';
-                    break;
+                    return '/usr/local/bin/desktop-crawler --stop';
                 default:
                     throw new Error(`Unsupported platform: ${platform}`);
             }
-            return `"${executable}" --stop`;
         }
     }
 };
-// Helper functions
+// Update console logging to use stderr for all debug output
+function debug(...args) {
+    // No-op implementation - do not log to stderr or stdout
+    // This prevents interference with JSON-RPC communication
+}
 async function listApplications() {
     try {
         const files = await readdir('/Applications');
@@ -66,7 +67,7 @@ async function listApplications() {
             .sort();
     }
     catch (error) {
-        console.error('Error listing applications:', error);
+        // debug('Error listing applications:', error);
         return [];
     }
 }
@@ -78,7 +79,7 @@ async function launchApp(appName) {
         return true;
     }
     catch (error) {
-        console.error('Error launching application:', error);
+        // debug('Error launching application:', error);
         return false;
     }
 }
@@ -90,7 +91,7 @@ async function openWithApp(appName, filePath) {
         return true;
     }
     catch (error) {
-        console.error('Error opening file with application:', error);
+        // debug('Error opening file with application:', error);
         return false;
     }
 }
@@ -101,31 +102,54 @@ async function startApp(appName, args) {
         const appConfig = APP_CONFIGS[appName.toLowerCase()];
         if (appConfig) {
             // Use the app-specific configuration
-            console.log(`Starting ${appConfig.displayName} with configured settings`);
             const execPath = appConfig.executablePath ? appConfig.executablePath('') : '';
             const startArgs = appConfig.startArgs ? appConfig.startArgs(args) : (args || []);
-            console.log(`Command: ${execPath} ${startArgs.join(' ')}`);
-            const process = spawn(execPath, startArgs, {
-                detached: true, // Allow the process to run independently of its parent
-                stdio: 'ignore' // Don't pipe stdin/stdout/stderr to prevent blocking
-            });
-            process.unref();
-            // Wait briefly to check for immediate failures
-            return new Promise((resolve) => {
-                process.on('error', (error) => {
-                    resolve({
-                        success: false,
-                        message: `Failed to start ${appConfig.displayName}: ${error.message}`
+            if (execPath.includes(' ') && os.platform() === 'darwin') {
+                // For macOS with spaces in path, use exec instead of spawn
+                const cmdWithArgs = `"${execPath}" ${startArgs.join(' ')}`;
+                try {
+                    // Use execSync instead to avoid TypeScript issues with execAsync
+                    const { exec } = require('child_process');
+                    exec(cmdWithArgs, {
+                        detached: true,
+                        stdio: 'ignore'
                     });
-                });
-                // Short delay to check for immediate failures
-                setTimeout(() => {
-                    resolve({
+                    return {
                         success: true,
                         message: `${appConfig.displayName} started successfully with configured settings`
+                    };
+                }
+                catch (execError) {
+                    return {
+                        success: false,
+                        message: `Failed to start ${appConfig.displayName}: ${execError instanceof Error ? execError.message : 'Unknown error'}`
+                    };
+                }
+            }
+            else {
+                // Use spawn for other cases
+                const process = spawn(execPath, startArgs, {
+                    detached: true, // Allow the process to run independently of its parent
+                    stdio: 'ignore' // Don't pipe stdin/stdout/stderr to prevent blocking
+                });
+                process.unref();
+                // Wait briefly to check for immediate failures
+                return new Promise((resolve) => {
+                    process.on('error', (error) => {
+                        resolve({
+                            success: false,
+                            message: `Failed to start ${appConfig.displayName}: ${error.message}`
+                        });
                     });
-                }, 500);
-            });
+                    // Short delay to check for immediate failures
+                    setTimeout(() => {
+                        resolve({
+                            success: true,
+                            message: `${appConfig.displayName} started successfully with configured settings`
+                        });
+                    }, 500);
+                });
+            }
         }
         else {
             // Default behavior for other apps
@@ -134,34 +158,56 @@ async function startApp(appName, args) {
             // Get the executable name (usually the app name without .app)
             const executableName = fullAppName.replace(/\.app$/, '');
             const executablePath = join(appPath, 'Contents/MacOS', executableName);
-            console.log(`Starting application: ${executablePath} ${args ? args.join(' ') : ''}`);
-            // Spawn the process
-            const process = spawn(executablePath, args || [], {
-                detached: true, // Allow the process to run independently of its parent
-                stdio: 'ignore' // Don't pipe stdin/stdout/stderr to prevent blocking
-            });
-            // Unref the child process to allow the parent to exit independently
-            process.unref();
-            // Wait briefly to check for immediate failures
-            return new Promise((resolve) => {
-                process.on('error', (error) => {
-                    resolve({
-                        success: false,
-                        message: `Failed to start ${appName}: ${error.message}`
+            if (executablePath.includes(' ')) {
+                // For paths with spaces, use exec instead of spawn
+                const cmdWithArgs = `"${executablePath}" ${args ? args.join(' ') : ''}`;
+                try {
+                    // Use exec instead to avoid TypeScript issues with execAsync
+                    const { exec } = require('child_process');
+                    exec(cmdWithArgs, {
+                        detached: true,
+                        stdio: 'ignore'
                     });
-                });
-                // Short delay to check for immediate failures
-                setTimeout(() => {
-                    resolve({
+                    return {
                         success: true,
                         message: `Application ${appName} started successfully${args ? ' with arguments: ' + args.join(' ') : ''}`
+                    };
+                }
+                catch (execError) {
+                    return {
+                        success: false,
+                        message: `Failed to start ${appName}: ${execError instanceof Error ? execError.message : 'Unknown error'}`
+                    };
+                }
+            }
+            else {
+                // Spawn the process
+                const process = spawn(executablePath, args || [], {
+                    detached: true, // Allow the process to run independently of its parent
+                    stdio: 'ignore' // Don't pipe stdin/stdout/stderr to prevent blocking
+                });
+                // Unref the child process to allow the parent to exit independently
+                process.unref();
+                // Wait briefly to check for immediate failures
+                return new Promise((resolve) => {
+                    process.on('error', (error) => {
+                        resolve({
+                            success: false,
+                            message: `Failed to start ${appName}: ${error.message}`
+                        });
                     });
-                }, 500);
-            });
+                    // Short delay to check for immediate failures
+                    setTimeout(() => {
+                        resolve({
+                            success: true,
+                            message: `Application ${appName} started successfully${args ? ' with arguments: ' + args.join(' ') : ''}`
+                        });
+                    }, 500);
+                });
+            }
         }
     }
     catch (error) {
-        console.error('Error starting application:', error);
         return {
             success: false,
             message: `Failed to start application: ${error.message || 'Unknown error'}`
@@ -174,16 +220,49 @@ async function stopApp(appName) {
         const appConfig = APP_CONFIGS[appName.toLowerCase()];
         if (appConfig && appConfig.stopCommand) {
             // Use the app-specific stop command
-            console.log(`Stopping ${appConfig.displayName} with configured command`);
             const stopCommand = appConfig.stopCommand('');
-            console.log(`Command: ${stopCommand}`);
-            const { stdout, stderr } = await execAsync(stopCommand);
-            return {
-                success: true,
-                message: `${appConfig.displayName} stopped successfully using configured command`,
-                stdout: stdout || undefined,
-                stderr: stderr || undefined
-            };
+            // For macOS paths with spaces, use quotes on the path
+            if (os.platform() === 'darwin' && stopCommand.includes('/Applications/') && stopCommand.includes(' ')) {
+                // Extract the path and args
+                const parts = stopCommand.split(' --');
+                if (parts.length > 1) {
+                    const path = parts[0];
+                    const args = `--${parts[1]}`;
+                    try {
+                        const { stdout, stderr } = await execAsync(`"${path}" ${args}`);
+                        return {
+                            success: true,
+                            message: `${appConfig.displayName} stopped successfully using configured command`,
+                            stdout: stdout || undefined,
+                            stderr: stderr || undefined
+                        };
+                    }
+                    catch (error) {
+                        return {
+                            success: false,
+                            message: `Failed to stop ${appConfig.displayName}: ${error.message || 'Unknown error'}`,
+                            stderr: error.stderr || undefined
+                        };
+                    }
+                }
+            }
+            // Standard execution for other platforms or formats
+            try {
+                const { stdout, stderr } = await execAsync(stopCommand);
+                return {
+                    success: true,
+                    message: `${appConfig.displayName} stopped successfully using configured command`,
+                    stdout: stdout || undefined,
+                    stderr: stderr || undefined
+                };
+            }
+            catch (error) {
+                return {
+                    success: false,
+                    message: `Failed to stop ${appConfig.displayName}: ${error.message || 'Unknown error'}`,
+                    stderr: error.stderr || undefined
+                };
+            }
         }
         else {
             // Default behavior using pkill
@@ -208,7 +287,6 @@ async function stopApp(appName) {
                 message: `No running processes found for ${appName}`,
             };
         }
-        console.error('Error stopping application:', error);
         return {
             success: false,
             message: `Failed to stop application: ${error.message || 'Unknown error'}`,
@@ -464,14 +542,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 });
+// Install command handler for local installation
+if (process.argv[2] === 'install') {
+    try {
+        const packageName = '@modelcontextprotocol/desktop-apps-launcher-mcp';
+        // No debug/console output
+        // Check if package.json exists in the current directory
+        if (!fs.existsSync('package.json')) {
+            // Create a basic package.json file
+            fs.writeFileSync('package.json', JSON.stringify({
+                name: 'desktop-apps-launcher-local',
+                version: '1.0.0',
+                private: true
+            }, null, 2));
+        }
+        execAsync(`npm install ${packageName}`).then(() => {
+            process.exit(0);
+        }).catch(() => {
+            process.exit(1);
+        });
+    }
+    catch (error) {
+        process.exit(1);
+    }
+}
 async function runServer() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Mac Launcher MCP Server running on stdio");
-    // Keep the process alive
+    // Keep the process alive and handle interruption gracefully
     process.stdin.resume();
+    process.on('SIGINT', () => {
+        process.exit(0);
+    });
+    process.on('SIGTERM', () => {
+        process.exit(0);
+    });
 }
-runServer().catch((error) => {
-    console.error("Fatal error in main():", error);
-    process.exit(1);
+runServer().catch(() => {
+    // Silent error handling to avoid interfering with JSON-RPC
+    setTimeout(() => {
+        process.exit(1);
+    }, 1000);
 });

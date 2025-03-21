@@ -1,6 +1,6 @@
 {
   "name": "@neutralbase/desktop-apps-launcher-mcp",
-  "version": "0.0.12",
+  "version": "0.0.20",
   "description": "MCP server for launching and managing desktop applications",
   "main": "dist/src/index.js",
   "type": "module",
